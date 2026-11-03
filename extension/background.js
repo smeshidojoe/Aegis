@@ -103,16 +103,27 @@ async function status() {
 // и быстрее, чем из окна браузера.
 
 let lastReported = "";
+let quietUntil = 0;
+const QUIET_MS = 60000;
 
 async function reportActiveTab() {
   try {
     const [tab] = await api.tabs.query({ active: true, lastFocusedWindow: true });
-    const url = tab?.url || "";
-    if (!url || url === lastReported || !/^https?:/.test(url)) return;
+    // Не http(s) — пустой адрес: иначе у Aegis остался бы адрес прошлого сайта.
+    const url = /^https?:/.test(tab?.url || "") ? tab.url : "";
+    const title = url ? tab.title || "" : "";
+    const report = url + "\n" + title;
+    if (report === lastReported || Date.now() < quietUntil) return;
     const auth = await credentials();
     if (!auth.key) return;
-    lastReported = url;
-    await call("tab", { url, process: browserName()[1] });
+    lastReported = report;
+    // Заголовок — чтобы Aegis сверил адрес с окном, в котором нажали хоткей.
+    const reply = await call("tab", { url, title, process: browserName()[1] });
+    if (reply.error === "not_running" || reply.error === "no_host") {
+      // Aegis закрыт: не запускать посредника на каждой вкладке, спросить позже.
+      quietUntil = Date.now() + QUIET_MS;
+      lastReported = "";
+    }
   } catch (_) {
     // Нет Aegis — не страшно, хоткей прочитает адрес сам.
   }
@@ -120,17 +131,23 @@ async function reportActiveTab() {
 
 api.tabs.onActivated.addListener(reportActiveTab);
 api.tabs.onUpdated.addListener((_id, change, tab) => {
-  if (change.url && tab.active) reportActiveTab();
+  if ((change.url || change.title) && tab.active) reportActiveTab();
 });
 api.windows.onFocusChanged.addListener(reportActiveTab);
 
 // --- сообщения от страниц и всплывающего окна ------------------------------- //
 
-async function fillTab(tabId, entryId, url) {
+async function fillTab(tabId, entryId) {
+  // Адрес берём у вкладки сейчас, а не из окошка: она могла уйти на другой сайт.
+  const tab = await api.tabs.get(tabId);
+  const url = tab?.url || "";
   const reply = await call("fill", { url, entry_id: entryId });
   if (reply.type === "credentials") {
-    await api.tabs.sendMessage(tabId, { type: "aegis-fill", username: reply.username,
-                                        password: reply.password, totp: reply.totp });
+    // Только главному фрейму и только если он всё ещё на том же сайте: во
+    // фреймах чужих сайтов (реклама, виджеты) тоже бывают поля пароля.
+    await api.tabs.sendMessage(tabId, { type: "aegis-fill", origin: new URL(url).origin,
+                                        username: reply.username, password: reply.password,
+                                        totp: reply.totp }, { frameId: 0 });
   }
   return reply;
 }
@@ -152,7 +169,7 @@ async function handle(message, sender) {
     case "fill":
       return call("fill", { url, entry_id: message.entry_id });
     case "fill-tab":
-      return fillTab(message.tab_id, message.entry_id, message.url);
+      return fillTab(message.tab_id, message.entry_id);
     case "unlock":
       return call("unlock");
     case "open":

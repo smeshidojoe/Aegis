@@ -24,6 +24,9 @@ import time
 PREFIX = "vault-"
 SUFFIX = ".aegis"
 STAMP = "%Y-%m-%d_%H-%M-%S"
+# Копии «вручную» (кнопка, перед восстановлением, новая вторая папка): правки
+# следом их не заменяют — иначе состояние до восстановления пропало бы.
+MANUAL = "-keep"
 
 COALESCE_SECONDS = 10 * 60
 KEEP_RECENT = 20
@@ -31,16 +34,23 @@ KEEP_DAYS = 30
 KEEP_MONTHS = 12
 
 
-def _name(now):
-    return PREFIX + time.strftime(STAMP, time.localtime(now)) + SUFFIX
+def _name(now, manual=False):
+    return PREFIX + time.strftime(STAMP, time.localtime(now)) + (MANUAL if manual else "") + SUFFIX
+
+
+def is_manual(path):
+    return path.endswith(MANUAL + SUFFIX)
 
 
 def _parse(name):
     """Время копии из имени файла или None, если файл не наш."""
     if not (name.startswith(PREFIX) and name.endswith(SUFFIX)):
         return None
+    stamp = name[len(PREFIX):-len(SUFFIX)]
+    if stamp.endswith(MANUAL):
+        stamp = stamp[:-len(MANUAL)]
     try:
-        return time.mktime(time.strptime(name[len(PREFIX):-len(SUFFIX)], STAMP))
+        return time.mktime(time.strptime(stamp, STAMP))
     except ValueError:
         return None
 
@@ -66,8 +76,9 @@ def snapshot(vault_path, folder, now=None, coalesce=True):
     try:
         os.makedirs(folder, exist_ok=True)
         existing = listing(folder)
-        target = os.path.join(folder, _name(now))
-        if coalesce and existing and 0 <= now - existing[0][0] < COALESCE_SECONDS:
+        target = os.path.join(folder, _name(now, manual=not coalesce))
+        if (coalesce and existing and not is_manual(existing[0][1])
+                and 0 <= now - existing[0][0] < COALESCE_SECONDS):
             # Заменяем последнюю: новая копия получает новое имя, старая уходит.
             old = existing[0][1]
             _copy(vault_path, target)

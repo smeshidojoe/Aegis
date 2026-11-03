@@ -68,19 +68,28 @@ class Vault:
     def is_unlocked(self):
         return self._key is not None
 
-    def create(self, password):
+    # Argon2 долгий, программа считает его в потоке: read() и crypto.derive
+    # базу не меняют, а create/unlock/change_password с готовым ключом —
+    # быстрые, их зовут на главном потоке.
+
+    def create(self, password, key=None):
         """Новая пустая база. Существующую не перезаписывает."""
         if self.exists():
             raise FileExistsError(self.path)
-        self._key = crypto.derive(password)
+        self._key = key or crypto.derive(password)
         self.entries = []
         self.save()
 
-    def unlock(self, password):
-        """Бросает crypto.InvalidPassword или crypto.BadFile."""
+    def read(self, password):
+        """(payload, key) из файла, база не меняется. Бросает
+        crypto.InvalidPassword или crypto.BadFile."""
         with open(self.path, "rb") as f:
             blob = f.read()
-        payload, key = crypto.decrypt(password, blob)
+        return crypto.decrypt(password, blob)
+
+    def unlock(self, password, opened=None):
+        """opened — готовый результат read(password)."""
+        payload, key = opened or self.read(password)
         self.entries = [Entry.from_dict(e) for e in payload.get("entries", [])
                         if isinstance(e, dict)]
         self._key = key
@@ -96,15 +105,14 @@ class Vault:
         if not self.is_unlocked():
             return False
         try:
-            with open(self.path, "rb") as f:
-                crypto.decrypt(password, f.read())
+            self.read(password)
             return True
         except (OSError, crypto.InvalidPassword, crypto.BadFile):
             return False
 
-    def change_password(self, new_password):
+    def change_password(self, new_password, key=None):
         self._require()
-        self._key = crypto.derive(new_password)
+        self._key = key or crypto.derive(new_password)
         self.save()
 
     # --- записи ------------------------------------------------------------ #

@@ -71,20 +71,31 @@ def safe_delete(path, folder, expected):
 
 
 class Waiter:
-    """Опрос папок: poll() возвращает новые CSV, ещё не отданные раньше."""
+    """Опрос папок: poll() возвращает новые CSV, ещё не отданные раньше.
+    Файл отдаётся, когда два опроса подряд он не меняется: браузер может
+    писать выгрузку кусками, а недописанную прочитали бы наполовину."""
 
     def __init__(self, folders):
         self.since = time.time()
         self.folders = [f for f in folders if f and os.path.isdir(f)]
         self.before = {f: snapshot(f) for f in self.folders}
         self.seen = set()
+        self._last = {}           # путь -> fingerprint на прошлом опросе
 
     def poll(self):
         out = []
         for folder in self.folders:
             for path in new_csv_files(folder, self.before[folder], self.since):
                 key = os.path.normcase(path)
-                if key not in self.seen:
+                if key in self.seen:
+                    continue
+                try:
+                    stamp = fingerprint(path)
+                except OSError:
+                    continue
+                if stamp[0] and self._last.get(key) == stamp:
                     self.seen.add(key)
                     out.append((folder, path))
+                else:
+                    self._last[key] = stamp
         return out

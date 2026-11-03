@@ -17,6 +17,7 @@ def test_only_new_csv_is_found_and_deleted(tmp_path):
     new_txt.write_text("x")
     new_csv = tmp_path / "Chrome Passwords.csv"
     new_csv.write_text(CSV)
+    assert waiter.poll() == []                      # сначала ждём, что дописан
     found = waiter.poll()
     assert found == [(str(tmp_path), str(new_csv))]
     assert waiter.poll() == []                      # второй раз не отдаётся
@@ -25,6 +26,16 @@ def test_only_new_csv_is_found_and_deleted(tmp_path):
     assert watch.safe_delete(str(new_csv), str(tmp_path), expected)
     assert not new_csv.exists()
     assert old_csv.exists() and other.exists() and new_txt.exists()
+
+
+def test_growing_file_waits(tmp_path):
+    waiter = watch.Waiter([str(tmp_path)])
+    path = tmp_path / "export.csv"
+    path.write_text(CSV)
+    assert waiter.poll() == []
+    path.write_text(CSV + "B,https://b.com,me,pw2\n")    # ещё дописывается
+    assert waiter.poll() == []
+    assert waiter.poll() == [(str(tmp_path), str(path))]
 
 
 def test_changed_file_is_not_deleted(tmp_path):

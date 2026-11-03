@@ -111,6 +111,20 @@ def test_backups_coalesce_and_keep(tmp_path):
     assert len(backup.listing(folder)) == 2
 
 
+def test_manual_copy_survives_next_edit(tmp_path):
+    src = tmp_path / "v.aegis"
+    src.write_bytes(b"before-restore")
+    folder = str(tmp_path / "b")
+    now = time.time()
+    manual = backup.snapshot(str(src), folder, now, coalesce=False)
+    src.write_bytes(b"after")
+    backup.snapshot(str(src), folder, now + 60)
+    backup.snapshot(str(src), folder, now + 120)       # эта заменяет предыдущую, не ручную
+    paths = [p for _, p in backup.listing(folder)]
+    assert manual in paths and len(paths) == 2
+    assert open(manual, "rb").read() == b"before-restore"
+
+
 def test_backup_retention():
     now = time.mktime((2026, 11, 3, 12, 0, 0, 0, 0, -1))
     # 100 копий раз в 6 часов: 25 дней назад и ближе.

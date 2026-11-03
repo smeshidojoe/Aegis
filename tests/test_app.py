@@ -76,6 +76,38 @@ def test_settings_page_builds_in_both_states(aegis, qapp):
     aegis.set_language("ru")
 
 
+def test_lock_during_unlock_keeps_vault_closed(aegis, qapp):
+    aegis.vault.create("long-master-password")
+    aegis.vault.lock()
+    aegis.panel.summon()
+    aegis.password_submitted("locked", {"password": "long-master-password"})
+    aegis.lock()                                   # Win+L, пока считается ключ
+    pump(qapp, timeout=1.0)
+    assert not aegis.vault.is_unlocked() and aegis.vault.entries == []
+
+
+def test_open_url_only_web(aegis, monkeypatch):
+    from aegis.vault.store import Entry
+    opened = []
+    monkeypatch.setattr("aegis.core.winapi.shell_open", lambda target, *a, **k: opened.append(target))
+    for url in ("file:///C:/x.exe", "\\\\server\\share\\x.exe", "github.com", "http://a.com"):
+        aegis._do_open_url(Entry(title="x", url=url), None)
+    assert opened == ["https://C:/x.exe", "https://server\\share\\x.exe", "https://github.com",
+                      "http://a.com"]
+
+
+def test_offer_save_cancel_keeps_old_password(aegis, qapp):
+    from aegis.vault.store import Entry
+    aegis.vault.create("long-master-password")
+    entry = Entry(title="GitHub", username="me", password="old", url="https://github.com")
+    aegis.vault.put(entry)
+    aegis.offer_save("https://github.com/login", "me", "new")
+    aegis.toast._on_click()
+    assert aegis.panel.mode == "edit" and aegis.panel.editor.password.text() == "new"
+    aegis.panel.editor.cancelled.emit()
+    assert aegis.vault.get(entry.id).password == "old"
+
+
 def test_browser_export_imports_and_deletes_only_its_file(aegis, qapp, tmp_path, monkeypatch):
     from aegis.vault import browsers, watch
     aegis.vault.create("long-master-password")
@@ -92,6 +124,8 @@ def test_browser_export_imports_and_deletes_only_its_file(aegis, qapp, tmp_path,
     unrelated.write_text("city,population\nX,1\n")
     export = downloads / "Chrome Passwords.csv"
     export.write_text("name,url,username,password\nGitHub,https://github.com,me,pw\n")
+    aegis._poll_export()
+    assert export.exists()                       # первый опрос — ждём, что дописан
     aegis._poll_export()
 
     assert [e.title for e in aegis.vault.entries] == ["GitHub"]

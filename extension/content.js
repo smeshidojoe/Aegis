@@ -261,7 +261,8 @@
   }
 
   api.runtime.onMessage.addListener((message) => {
-    if (message.type === "aegis-fill" && document.querySelector('input[type="password"]')) {
+    if (message.type === "aegis-fill" && message.origin === location.origin
+        && document.querySelector('input[type="password"]')) {
       fill(message, document.activeElement instanceof HTMLInputElement ? document.activeElement
         : null);
     }

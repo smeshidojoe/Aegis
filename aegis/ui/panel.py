@@ -390,6 +390,14 @@ class Panel(QWidget):
         if callback is not None:
             callback(value)
 
+    def withdraw(self, on_answer):
+        """Снять вопрос, если он ещё ждёт ответа on_answer (истекло время)."""
+        if self._on_answer is not on_answer:
+            return
+        self._on_answer = None
+        if self.mode == "confirm":
+            self.set_mode(self._back_mode)
+
     def _on_answered(self, value):
         self._answer(value)
         if self.mode == "confirm":

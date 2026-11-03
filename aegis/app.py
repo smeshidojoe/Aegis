@@ -66,6 +66,7 @@ class Aegis(QObject):
         self.toast = Toast()
         self.panel = Panel(self)
         self._after_unlock = None       # что сделать, когда базу откроют
+        self._lock_generation = 0       # растёт при каждой блокировке
         self._done.connect(lambda callback, result: callback(result),
                            Qt.ConnectionType.QueuedConnection)
 
@@ -253,9 +254,11 @@ class Aegis(QObject):
 
     def _fill_url(self, ctx):
         """Адрес страницы: от расширения, если оно его сообщало, иначе из окна."""
-        reported = self.bridge.tab_url.get(ctx.process)
-        if reported:
-            ctx.url = reported
+        url, title = self.bridge.tab_url.get(ctx.process, ("", ""))
+        # Заголовок окна начинается с заголовка вкладки — значит, это то самое
+        # окно; иначе (другое окно, профиль без расширения) читаем адрес сами.
+        if url and title and ctx.title.startswith(title):
+            ctx.url = url
         elif self.config.get("read_browser_url"):
             self.address.request(ctx.hwnd)
 
@@ -278,25 +281,40 @@ class Aegis(QObject):
         threading.Thread(target=run, name="aegis-kdf", daemon=True).start()
 
     def password_submitted(self, mode, data):
+        """В потоке — только Argon2, база не меняется; её трогаем на главном
+        потоке и только если её не заперли, пока считался ключ."""
         password = data["password"]
+        generation = self._lock_generation
+
+        def current(done):
+            def wrapped(result):
+                if generation == self._lock_generation:
+                    done(result)
+            return wrapped
+
         if mode == "setup":
-            self._background(lambda: self.vault.create(password), self._created)
+            self._background(lambda: crypto.derive(password),
+                             current(lambda key: self._created(password, key)))
         elif mode == "locked":
-            self._background(lambda: self.vault.unlock(password), self._unlocked)
+            self._background(lambda: self.vault.read(password), current(self._unlocked))
         elif mode == "change":
             new = data["new"]
 
             def change():
-                if not self.vault.check_password(password):
-                    raise crypto.InvalidPassword()
-                self.vault.change_password(new)
-            self._background(change, self._changed)
+                self.vault.read(password)            # InvalidPassword — не тот пароль
+                return crypto.derive(new)
+            self._background(change, current(lambda key: self._changed(new, key)))
         elif mode == "verify":
-            self._background(lambda: self.vault.check_password(password), self._verified)
+            self._background(lambda: self.vault.check_password(password),
+                             current(self._verified))
 
-    def _created(self, result):
-        if isinstance(result, Exception):
-            logbook.log("не создал базу:", repr(result))
+    def _created(self, password, key):
+        try:
+            if isinstance(key, Exception):
+                raise key
+            self.vault.create(password, key)
+        except Exception as error:
+            logbook.log("не создал базу:", repr(error))
             self.panel.password_failed(tr("hud.save_failed"))
             return
         self._opened()
@@ -308,6 +326,7 @@ class Aegis(QObject):
             logbook.log("не открыл базу:", repr(result))
             self.panel.password_failed(tr("unlock.broken"))
         else:
+            self.vault.unlock("", result)
             self._opened()
 
     def _opened(self):
@@ -317,11 +336,16 @@ class Aegis(QObject):
         if action is not None:
             action()
 
-    def _changed(self, result):
-        if isinstance(result, crypto.InvalidPassword):
+    def _changed(self, new, key):
+        if isinstance(key, crypto.InvalidPassword):
             self.panel.password_failed(tr("unlock.wrong"))
-        elif isinstance(result, Exception):
-            logbook.log("не сменил пароль:", repr(result))
+            return
+        try:
+            if isinstance(key, Exception):
+                raise key
+            self.vault.change_password(new, key)
+        except Exception as error:
+            logbook.log("не сменил пароль:", repr(error))
             self.panel.password_failed(tr("hud.save_failed"))
         else:
             self.panel.set_mode("settings")
@@ -341,6 +365,8 @@ class Aegis(QObject):
         # непрочитанный файл нельзя. Он останется там, куда его сохранили.
         self._stop_export()
         self._after_unlock = None
+        # Ключ, который сейчас считается в потоке, по готовности выбросят.
+        self._lock_generation += 1
         was_open = self.vault.is_unlocked()
         self.vault.lock()
         self._sync_tray()
@@ -421,7 +447,11 @@ class Aegis(QObject):
         self._copy_secret(code, tr("hud.copied_totp"))
 
     def _do_open_url(self, entry, _ctx):
-        url = entry.url if "://" in entry.url else "https://" + entry.url
+        # Только веб-адреса: file://, UNC и прочие схемы ShellExecute запустил
+        # бы как программу, а адрес мог прийти из чужого CSV.
+        url = entry.url.strip()
+        if not url.lower().startswith(("http://", "https://")):
+            url = "https://" + url.split("://", 1)[-1].lstrip("/\\")
         winapi.allow_foreground_for_launched()
         self.panel.dismiss()
         winapi.shell_open(url)
@@ -677,6 +707,9 @@ class Aegis(QObject):
         self.panel.ask(tr("confirm.pair_title"), tr("confirm.pair_text", browser=browser),
                        tr("confirm.pair_yes"), tr("confirm.pair_no"), answer)
 
+    def withdraw_pairing(self, answer):
+        self.panel.withdraw(answer)
+
     def offer_save(self, url, username, password):
         """Расширение заметило вход с новым паролем — предложить сохранить."""
         if not password:
@@ -690,8 +723,7 @@ class Aegis(QObject):
                              if e.username == username and site_of(Context(url=e.url).host)
                              == site), None)
             if existing is not None:
-                existing.password = password
-                self.panel.edit(existing)
+                self.panel.edit(existing, {"password": password})
             else:
                 self.panel.edit(None, prefill)
 

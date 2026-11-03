@@ -80,8 +80,7 @@ async function render() {
     text.append(el("div", "title", entry.title), el("div", "sub", entry.username));
     row.append(tile, text);
     row.addEventListener("click", async () => {
-      await api.runtime.sendMessage({ type: "fill-tab", tab_id: tab.id, entry_id: entry.id,
-                                      url: tab.url });
+      await api.runtime.sendMessage({ type: "fill-tab", tab_id: tab.id, entry_id: entry.id });
       window.close();
     });
     main.append(row);

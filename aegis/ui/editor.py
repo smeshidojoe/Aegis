@@ -256,6 +256,12 @@ class EntryEditor(QScrollArea):
         self.eye.setChecked(False)
         self.title.setProperty("error", False)
         self.delete.setVisible(not self.is_new)
+        if not self.is_new and prefill:
+            # Новые значения для существующей записи — только в поля: сама
+            # запись меняется по «Сохранить», «Отмена» её не трогает.
+            for name in ("title", "username", "password", "url"):
+                if name in prefill:
+                    getattr(self, name).setText(prefill[name])
         if self.is_new and not e.password:
             self.generate()
         self.strength.set_level(generator.strength(self.password.text()))

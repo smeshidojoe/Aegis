@@ -124,6 +124,7 @@ class Connection(QObject):
         self.bridge = bridge
         self.buf = b""
         self.browser = ""
+        self.gone = False
         socket.readyRead.connect(self._on_ready)
         socket.disconnected.connect(self._on_gone)
 
@@ -145,10 +146,14 @@ class Connection(QObject):
         self.feed(bytes(self.socket.readAll()))
 
     def _on_gone(self):
+        self.gone = True
         self.bridge.forget(self)
         self.socket.deleteLater()
 
     def reply(self, request, message):
+        # Ответ может опоздать (вопрос о сопряжении ждёт минуту): сокета уже нет.
+        if self.gone:
+            return
         message = dict(message, rid=request.get("rid"))
         if self.socket.isValid():
             self.socket.write(json.dumps(message, ensure_ascii=False).encode("utf-8") + b"\n")
@@ -160,7 +165,9 @@ class Bridge(QObject):
         super().__init__(app)
         self.app = app
         self.connections = []
-        self.tab_url = {}         # браузер (имя exe) -> адрес активной вкладки
+        # браузер (имя exe) -> (адрес, заголовок) активной вкладки. Заголовок
+        # сверяется с окном хоткея: адрес из другого окна или профиля не берём.
+        self.tab_url = {}
 
     def adopt(self, socket, rest=b""):
         conn = Connection(socket, self)
@@ -205,8 +212,13 @@ class Bridge(QObject):
             self.app.config.set("bridge_pairs", pairs)
             conn.reply(message, {"type": "paired", "pair_id": pair_id, "key": key})
 
+        def expire():
+            # Не ответили — вопрос убираем, «Разрешить» потом ничего бы не сделало.
+            self.app.withdraw_pairing(answer)
+            answer(False)
+
         self.app.ask_pairing(name, answer)
-        QTimer.singleShot(PAIR_TIMEOUT_MS, lambda: answer(False))
+        QTimer.singleShot(PAIR_TIMEOUT_MS, expire)
 
     # --- разбор ------------------------------------------------------------ #
 
@@ -230,7 +242,12 @@ class Bridge(QObject):
                 conn.browser = str(message.get("browser", ""))
                 conn.reply(message, {"type": "hello", "locked": not vault.is_unlocked()})
             elif kind == "tab":
-                self.tab_url[str(message.get("process", "")).lower()] = str(message.get("url", ""))
+                process = str(message.get("process", "")).lower()
+                url, title = str(message.get("url", "")), str(message.get("title", ""))
+                if url and title:
+                    self.tab_url[process] = (url, title)
+                else:
+                    self.tab_url.pop(process, None)
                 conn.reply(message, {"type": "ok"})
             elif kind == "unlock":
                 self.app.summon_unlock()

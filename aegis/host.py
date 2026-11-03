@@ -10,14 +10,23 @@
 Без Qt и без остальной программы: посредник живёт столько же, сколько
 браузер, и не должен ни есть память, ни долго стартовать.
 
-Aegis не запущен — посредник запускает его и ждёт канала несколько секунд.
+Aegis не запущен — посредник запускает его и ждёт канала несколько секунд,
+но только по действию человека (LAUNCH_TYPES): закрытый из трея Aegis не
+должен воскресать от каждого переключения вкладки.
+
+Посредник — тот же Aegis.exe, поэтому, пока он жив, файл программы занят:
+установщик и обновление не могут его заменить. Поэтому посредник выходит
+вместе с Aegis (следит за процессом по ту сторону канала).
 """
 
 import ctypes
 import json
+import msvcrt
+import os
 import struct
 import subprocess
 import sys
+import threading
 import time
 from ctypes import wintypes
 
@@ -27,9 +36,19 @@ PIPE = r"\\.\pipe\%s" % IPC_NAME
 START_WAIT_S = 8.0
 STD_INPUT_HANDLE = -10
 STD_OUTPUT_HANDLE = -11
+SYNCHRONIZE = 0x00100000
+INFINITE = 0xFFFFFFFF
+# Сообщения, которые шлёт человек (открыл окошко, нажал кнопку). Остальные
+# (адрес вкладки, поиск записей для поля входа) идут сами и Aegis не запускают.
+LAUNCH_TYPES = {"ping", "pair", "unlock", "open", "fill"}
 
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 _kernel32.GetStdHandle.restype = wintypes.HANDLE
+_kernel32.GetNamedPipeServerProcessId.argtypes = [wintypes.HANDLE,
+                                                  ctypes.POINTER(wintypes.ULONG)]
+_kernel32.OpenProcess.restype = wintypes.HANDLE
+_kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+_kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
 _kernel32.ReadFile.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD,
                                ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
 _kernel32.WriteFile.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD,
@@ -111,9 +130,9 @@ def _open_pipe():
         return None
 
 
-def connect():
+def connect(launch):
     pipe = _open_pipe()
-    if pipe is not None or not _launch_aegis():
+    if pipe is not None or not launch or not _launch_aegis():
         return pipe
     end = time.monotonic() + START_WAIT_S
     while time.monotonic() < end:
@@ -124,15 +143,37 @@ def connect():
     return None
 
 
+def exit_with_server(pipe):
+    """Aegis закрылся — выйти сразу, не дожидаясь следующего сообщения браузера
+    (до него посредник держал бы Aegis.exe занятым). False — не вышло следить."""
+    pid = wintypes.ULONG()
+    handle = msvcrt.get_osfhandle(pipe.fileno())
+    if not _kernel32.GetNamedPipeServerProcessId(handle, ctypes.byref(pid)):
+        return False
+    process = _kernel32.OpenProcess(SYNCHRONIZE, False, pid.value)
+    if not process:
+        return False
+
+    def wait():
+        _kernel32.WaitForSingleObject(process, INFINITE)
+        os._exit(0)
+    threading.Thread(target=wait, name="aegis-host-watch", daemon=True).start()
+    return True
+
+
 def main():
     std = _Std()
-    pipe = connect()
+    message = read_message(std)
+    if message is None:
+        return 0
+    pipe = connect(message.get("type") in LAUNCH_TYPES)
     if pipe is None:
-        # Ответить на первое сообщение, чтобы расширение показало причину.
-        message = read_message(std)
+        # Ответить, чтобы расширение показало причину, и выйти: висящий без
+        # дела посредник держал бы файл программы занятым.
         write_message(std, {"type": "error", "error": "not_running",
-                            "rid": (message or {}).get("rid")})
+                            "rid": message.get("rid")})
         return 1
+    exit_with_server(pipe)
     pipe.write(b"bridge\n")
     # Строго «запрос — ответ»: у синхронного хэндла канала чтение и запись не
     # идут одновременно (Windows ставит их в очередь), поэтому ответ ждём,
@@ -140,7 +181,8 @@ def main():
     # Aegis отвечает ровно одной строкой.
     replies = _Lines(pipe)
     while True:
-        message = read_message(std)
+        if message is None:
+            message = read_message(std)
         if message is None:
             return 0                 # браузер закрыл порт
         try:
@@ -148,6 +190,7 @@ def main():
             line = replies.next()
         except OSError:
             line = None
+        message = None
         if line is None:
             return 0                 # Aegis закрылся — браузер переподключится сам
         try:

@@ -83,6 +83,34 @@ begin
   end;
 end;
 
+// Посредник расширения — тот же Aegis.exe, его запускает браузер с адресом
+// расширения в аргументах. Мьютекса у него нет, окна тоже, а файл программы
+// он держит занятым. Новые версии выходят вместе с Aegis, но посредники от
+// 0.1.0 висят, пока открыт браузер, — закрываем их, и только их (по командной
+// строке). Браузер запустит нового, когда расширению он понадобится.
+procedure StopBrowserHosts;
+var
+  Code: Integer;
+begin
+  Exec('powershell.exe', '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' +
+       'Get-CimInstance Win32_Process | Where-Object { $_.Name -eq ''Aegis.exe'' -and ' +
+       '$_.CommandLine -match ''chrome-extension://|aegis@smeshidojoe|--native-host'' } | ' +
+       'ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"',
+       '', SW_HIDE, ewWaitUntilTerminated, Code);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopBrowserHosts;
+  Result := '';
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  StopBrowserHosts;
+  Result := True;
+end;
+
 // При удалении спрашиваем, стирать ли базу паролей. По умолчанию — нет:
 // потерять пароли привычным «Далее» куда хуже, чем оставить файл. Копию
 // расширения и манифесты посредника в %LOCALAPPDATA% программа пересоздаёт

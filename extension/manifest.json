@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Aegis",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Fills in logins from the Aegis password manager on your computer.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAt3V7Is0i+h7GNYUxa6wf8UpCH2nlMJCZTpzkpGl1EXItDq+t75LpqmtgU78uYRGjyd0lcIW82pCfMHOXp6pbeTMlgWphTEvgLJsoBSvKj/vD55j25jGbptGC1aeYgraaJyZQjUkvCrwscHt3jaIrJX2ZaXvp1H3Qz+uMpUwWoPEEE3J6fn7eCdFlCoxRU1i2uXRnT8TsTnmUWyTYiKNmp4UcJK1jMI1eQd7ch2fyzuQz8+IOyQCS+tBHkTVbVRgZxTBq0ncCQy3rzRUZcsC2zZQbKze42fTdLIXgiv/sPnBNK6XhgTFiD2llt+3eX0zV4zvxkOoz+Y/QvcrXF5BfFwIDAQAB",
   "permissions": [

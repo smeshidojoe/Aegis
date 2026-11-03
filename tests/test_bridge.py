@@ -124,6 +124,31 @@ def test_known_pair_is_not_offered(tmp_path):
     assert conn.replies[-1]["known"] is True
 
 
+def test_tab_report_is_cleared_for_non_web_pages(tmp_path):
+    bridge, _app = _bridge(tmp_path, [])
+    auth = _paired(bridge)
+    conn = _Conn()
+    bridge.handle(conn, dict(auth, type="tab", url="https://github.com", title="GitHub",
+                             process="Chrome.exe", rid=10))
+    assert bridge.tab_url["chrome.exe"] == ("https://github.com", "GitHub")
+    bridge.handle(conn, dict(auth, type="tab", url="", title="", process="chrome.exe", rid=11))
+    assert "chrome.exe" not in bridge.tab_url
+
+
+def test_pairing_timeout_withdraws_question(tmp_path, qapp, monkeypatch):
+    import aegis.bridge as bridge_mod
+    from conftest import pump
+    monkeypatch.setattr(bridge_mod, "PAIR_TIMEOUT_MS", 10)
+    bridge, app = _bridge(tmp_path, [])
+    withdrawn = []
+    app.ask_pairing = lambda name, answer: None          # человек не отвечает
+    app.withdraw_pairing = withdrawn.append
+    conn = _Conn()
+    bridge.handle(conn, {"type": "pair", "browser": "Chrome", "rid": 1})
+    assert pump(qapp, lambda: conn.replies)
+    assert conn.replies[-1]["type"] == "denied" and len(withdrawn) == 1
+
+
 # --- посредник ---------------------------------------------------------------- #
 
 class _FakeStd:
@@ -138,6 +163,21 @@ class _FakeStd:
     def write(self, data):
         self.out.write(data)
         return True
+
+
+def test_host_launches_aegis_only_for_user_actions(monkeypatch):
+    launched = []
+    monkeypatch.setattr(host, "_open_pipe", lambda: None)
+    monkeypatch.setattr(host, "_launch_aegis", lambda: launched.append(1) or False)
+    for kind, expected in (("tab", 0), ("query", 0), ("ping", 1)):
+        launched.clear()
+        body = json.dumps({"type": kind, "rid": 3}).encode()
+        std = _FakeStd(struct.pack("<I", len(body)) + body)
+        monkeypatch.setattr(host, "_Std", lambda: std)
+        assert host.main() == 1
+        assert len(launched) == expected, kind
+        reply = json.loads(std.out.getvalue()[4:])
+        assert reply == {"type": "error", "error": "not_running", "rid": 3}
 
 
 def test_native_message_framing():
