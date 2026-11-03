@@ -1,0 +1,19 @@
+# Aegis — зависимости для запуска.
+#   pip install -r requirements.txt
+
+# Интерфейс и канал между экземплярами и посредником расширения (QtNetwork).
+PySide6==6.11.2
+
+# Шифрование базы: Argon2id для ключа из мастер-пароля, AES-256-GCM для данных.
+argon2-cffi>=23.1
+cryptography>=42
+
+# Адрес страницы из окна браузера (UI Automation).
+comtypes>=1.4
+
+# Проверка обновлений по HTTPS: свежие корневые сертификаты.
+certifi
+
+# --- Только для сборки ------------------------------------------------------ #
+# pyinstaller          — собрать Aegis.exe (см. Aegis.spec)
+# pillow               — записать assets/app.ico (tools/make_assets.py)

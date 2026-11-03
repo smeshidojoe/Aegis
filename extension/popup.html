@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { margin: 0; width: 320px; background: #1a1a1f; color: rgba(255,255,255,.92);
+           font: 13px/1.4 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+    header { display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+             border-bottom: 1px solid rgba(255,255,255,.08); }
+    header img { width: 28px; height: 28px; }
+    header .name { font-weight: 600; font-size: 14px; }
+    header .state { color: rgba(255,255,255,.55); font-size: 12px; }
+    main { padding: 6px; }
+    .row { display: flex; gap: 10px; align-items: center; padding: 7px 8px; border-radius: 8px;
+           cursor: pointer; }
+    .row:hover { background: rgba(255,255,255,.08); }
+    .tile { width: 26px; height: 26px; border-radius: 7px; flex: none; display: flex;
+            align-items: center; justify-content: center; font-weight: 600; color: #fff; }
+    .text { min-width: 0; }
+    .title, .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sub { color: rgba(255,255,255,.5); font-size: 12px; }
+    .note { padding: 10px 10px 6px; color: rgba(255,255,255,.62); }
+    button { display: block; width: calc(100% - 16px); margin: 6px 8px 8px; padding: 8px;
+             border: 0; border-radius: 8px; background: #0a84ff; color: #fff; font: inherit;
+             cursor: pointer; }
+    button.plain { background: rgba(255,255,255,.08); }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="icons/icon48.png" alt="">
+    <div><div class="name">Aegis</div><div class="state" id="state"></div></div>
+  </header>
+  <main id="main"></main>
+  <script src="popup.js"></script>
+</body>
+</html>
